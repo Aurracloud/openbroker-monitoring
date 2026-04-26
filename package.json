@@ -1,0 +1,50 @@
+{
+  "name": "openbroker-monitoring",
+  "version": "0.1.0",
+  "description": "Optional dashboard/metrics forwarder for the openbroker CLI. Auto-loaded by `openbroker auto run` when installed alongside it.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src/",
+    "README.md"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "openbroker": ">=1.0.89"
+  },
+  "peerDependenciesMeta": {
+    "openbroker": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aurracloud/openbroker-monitoring.git"
+  },
+  "homepage": "https://github.com/aurracloud/openbroker-monitoring#readme",
+  "bugs": {
+    "url": "https://github.com/aurracloud/openbroker-monitoring/issues"
+  },
+  "author": "aurracloud",
+  "keywords": [
+    "openbroker",
+    "monitoring",
+    "metrics",
+    "audit",
+    "dashboard",
+    "hyperliquid"
+  ],
+  "license": "MIT"
+}
