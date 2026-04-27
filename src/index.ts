@@ -55,9 +55,21 @@ function resolveConfig(opts: DashboardObserverOptions = {}): ResolvedConfig | nu
     '';
   const timeoutMs = opts.timeoutMs ?? 5_000;
 
-  if (!url || !vaultAddress) return null;
+  if (!url || !vaultAddress) {
+    const missing: string[] = [];
+    if (!url) missing.push('OB_DASHBOARD_URL');
+    if (!vaultAddress) missing.push('HYPERSTABLE_VAULT_ADDRESS|VAULT');
+    console.warn(
+      `[openbroker-monitoring] observer disabled — missing required env: ${missing.join(', ')}`
+    );
+    return null;
+  }
   return { url, apiKey, vaultAddress, timeoutMs };
 }
+
+// Throttle repeated fetch warnings so a flapping dashboard doesn't flood logs.
+let lastPostErrLogMs = 0;
+const POST_ERR_LOG_INTERVAL_MS = 30_000;
 
 function postJSON(cfg: ResolvedConfig, path: string, body: unknown): void {
   const target = `${cfg.url}/api/vaults/${cfg.vaultAddress.toLowerCase()}${path}`;
@@ -70,9 +82,27 @@ function postJSON(cfg: ResolvedConfig, path: string, body: unknown): void {
     headers,
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(cfg.timeoutMs),
-  }).catch(() => {
-    // Silent — dashboard may be down; automation must not be affected.
-  });
+  })
+    .then((res) => {
+      if (!res.ok) {
+        const now = Date.now();
+        if (now - lastPostErrLogMs > POST_ERR_LOG_INTERVAL_MS) {
+          lastPostErrLogMs = now;
+          console.warn(
+            `[openbroker-monitoring] POST ${path} -> HTTP ${res.status} ${res.statusText}`
+          );
+        }
+      }
+    })
+    .catch((err) => {
+      // Network / timeout / abort. Throttle so a downed dashboard can't flood.
+      const now = Date.now();
+      if (now - lastPostErrLogMs > POST_ERR_LOG_INTERVAL_MS) {
+        lastPostErrLogMs = now;
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`[openbroker-monitoring] POST ${path} failed: ${msg}`);
+      }
+    });
 }
 
 /**
@@ -85,6 +115,11 @@ export function createDashboardObserver(
 ): AutomationAuditObserver | null {
   const cfg = resolveConfig(opts);
   if (!cfg) return null;
+
+  console.log(
+    `[openbroker-monitoring] observer enabled — url=${cfg.url} vault=${cfg.vaultAddress.toLowerCase()} ` +
+      `apiKey=${cfg.apiKey ? '<set>' : '<unset>'} timeoutMs=${cfg.timeoutMs}`
+  );
 
   return {
     onNote(kind, payload) {
