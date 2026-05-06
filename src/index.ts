@@ -147,3 +147,5 @@ export function createDashboardObserver(
 // Default export is the factory so openbroker's convention loader works
 // regardless of whether the consumer passes options.
 export default createDashboardObserver;
+
+export { createMonitoringServer, startMonitoringServer } from './server.js';

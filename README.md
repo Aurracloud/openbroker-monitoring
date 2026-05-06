@@ -1,10 +1,11 @@
 # openbroker-monitoring
 
-Optional dashboard / metrics forwarder for [`openbroker`](https://www.npmjs.com/package/openbroker).
+Local dashboard and optional remote telemetry forwarder for [`openbroker`](https://www.npmjs.com/package/openbroker) automations.
 
-## Why this is a separate package
+The package now has two jobs:
 
-The `openbroker` CLI ships as an OpenClaw plugin. OpenClaw scans plugin tarballs at install time and blocks the combination of `process.env` access + outbound `fetch` (the "credential harvesting" rule). Shipping the dashboard forwarder inside the plugin tripped that rule, so the network egress lives here instead.
+- serve a local browser dashboard for any OpenBroker automation by reading the existing `~/.openbroker/automation-audit.sqlite` database
+- keep the legacy dashboard observer that forwards audit notes/metrics/actions to vault-scoped HTTP endpoints when `OB_DASHBOARD_URL` and a vault address are configured
 
 ## Install
 
@@ -12,49 +13,92 @@ The `openbroker` CLI ships as an OpenClaw plugin. OpenClaw scans plugin tarballs
 npm install openbroker openbroker-monitoring
 ```
 
-`openbroker auto run` resolves `openbroker-monitoring` at startup using Node's normal module resolver. If it can be found, the dashboard observer is wired into the audit pipeline automatically — no flags needed.
+## Local Dashboard
 
-## Configuration
+Run your automation in one terminal:
+
+```bash
+openbroker auto run ./my-automation.ts --id my-auto
+```
+
+Run the monitor in another terminal:
+
+```bash
+openbroker-monitoring serve --port 3001
+```
+
+Then open:
+
+```text
+http://127.0.0.1:3001
+```
+
+The dashboard reads OpenBroker's audit database directly, so it works for any automation that uses the standard `openbroker auto run` runtime. No vault address, registry entry, webhook, or dashboard env vars are required.
+
+### Dashboard Features
+
+- automation list with running/stale/stopped status
+- latest run metadata, script path, dry/live mode, PID, account metadata
+- live account snapshots from the audit DB
+- latest metrics emitted through `api.audit.metric`
+- logs from the automation runtime
+- audited client actions/orders/cancels
+- fills, errors, and notes
+- automatic browser refresh
+
+### Configuration
 
 | Env var | Purpose |
 | --- | --- |
-| `OB_DASHBOARD_URL` | Dashboard base URL, e.g. `http://localhost:3001`. Required. |
+| `OB_MONITOR_PORT` | Local dashboard port. Default: `3001`. |
+| `OB_MONITOR_HOST` | Local dashboard host. Default: `127.0.0.1`. |
+| `OPENBROKER_AUDIT_DB_PATH` | Audit SQLite path. Default: `~/.openbroker/automation-audit.sqlite`. |
+
+Equivalent CLI flags:
+
+```bash
+openbroker-monitoring serve --host 127.0.0.1 --port 3001 --db ~/.openbroker/automation-audit.sqlite
+```
+
+## Programmatic Server
+
+```ts
+import { startMonitoringServer } from "openbroker-monitoring/server";
+
+const server = await startMonitoringServer({ port: 3001 });
+console.log(server.url);
+```
+
+## API
+
+The local server exposes generic automation endpoints:
+
+- `GET /api/health`
+- `GET /api/automations`
+- `GET /api/automations/:automationId/runs`
+- `GET /api/runs/:runId`
+- `GET /api/runs/:runId/logs`
+- `GET /api/runs/:runId/metrics`
+- `GET /api/runs/:runId/snapshots`
+- `GET /api/runs/:runId/actions`
+- `GET /api/runs/:runId/fills`
+- `GET /api/runs/:runId/notes`
+- `GET /api/runs/:runId/errors`
+
+## Legacy Remote Observer
+
+`openbroker auto run` convention-loads this package as an audit observer when it is installed alongside OpenBroker. The observer remains optional and only enables when these env vars are present:
+
+| Env var | Purpose |
+| --- | --- |
+| `OB_DASHBOARD_URL` | Remote dashboard base URL, e.g. `http://localhost:3001`. |
 | `OB_DASHBOARD_API_KEY` | Bearer token sent as `Authorization: Bearer <key>`. Optional. |
-| `HYPERSTABLE_VAULT_ADDRESS` (or `VAULT`) | Vault address used in the URL path. Required. |
+| `HYPERSTABLE_VAULT_ADDRESS` or `VAULT` | Vault address used in the legacy URL path. |
 
-If `OB_DASHBOARD_URL` or the vault address is missing, the observer returns `null` and the runtime no-ops.
+Legacy endpoints called by the observer:
 
-## Programmatic use
+- `POST {url}/api/vaults/{vault}/audit/notes`
+- `POST {url}/api/vaults/{vault}/audit/metrics`
+- `POST {url}/api/vaults/{vault}/agent/logs`
 
-```ts
-import { createDashboardObserver } from 'openbroker-monitoring';
-
-const observer = createDashboardObserver({
-  url: 'http://localhost:3001',
-  apiKey: process.env.MY_KEY,
-  vaultAddress: '0x...',
-});
-```
-
-The observer implements `AutomationAuditObserver`:
-
-```ts
-interface AutomationAuditObserver {
-  onNote?(kind: string, payload?: unknown): void;
-  onMetric?(name: string, value: number, tags?: Record<string, unknown>): void;
-  onAgentAction?(
-    action: string,
-    status: 'success' | 'error',
-    details: Record<string, unknown>,
-    txHash?: string,
-  ): void;
-}
-```
-
-## Endpoints called
-
-All requests are `POST` with `Content-Type: application/json`, fire-and-forget with a 5s timeout. Failures are swallowed so the trading loop is never blocked.
-
-- `POST {url}/api/vaults/{vault}/audit/notes` — `{ category, label, data }`
-- `POST {url}/api/vaults/{vault}/audit/metrics` — `{ name, value, tags }`
-- `POST {url}/api/vaults/{vault}/agent/logs` — `{ action, status, details, txHash? }`
+The local generic dashboard does not require this observer path because it reads the audit DB directly.

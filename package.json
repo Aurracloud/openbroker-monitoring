@@ -1,17 +1,24 @@
 {
   "name": "openbroker-monitoring",
-  "version": "0.1.1",
+  "version": "0.2.1",
   "description": "Optional dashboard/metrics forwarder for the openbroker CLI. Auto-loaded by `openbroker auto run` when installed alongside it.",
   "type": "module",
   "main": "./src/index.ts",
+  "bin": {
+    "openbroker-monitoring": "./bin/openbroker-monitoring.js"
+  },
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./server": "./src/server.ts"
   },
   "files": [
+    "bin/",
+    "public/",
     "src/",
     "README.md"
   ],
   "scripts": {
+    "serve": "node --no-warnings --experimental-sqlite --import tsx src/cli.ts serve",
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
@@ -21,6 +28,9 @@
     "openbroker": {
       "optional": true
     }
+  },
+  "dependencies": {
+    "tsx": "^4.19.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
