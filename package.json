@@ -19,7 +19,11 @@
   ],
   "scripts": {
     "serve": "node --no-warnings --experimental-sqlite --import tsx src/cli.ts serve",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "dashboard:install": "cd dashboard && npm install",
+    "dashboard:dev": "cd dashboard && npm run dev",
+    "dashboard:build": "cd dashboard && npm run build",
+    "prepack": "cd dashboard && npm install --no-audit --no-fund && npm run build"
   },
   "peerDependencies": {
     "openbroker": ">=1.0.89"

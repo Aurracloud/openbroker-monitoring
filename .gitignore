@@ -5,3 +5,7 @@ node_modules/
 .env.*
 !.env.example
 dist/
+dashboard/node_modules/
+dashboard/dist/
+# public/ contains the built dashboard bundle — committed for now so npm pack
+# ships ready-to-serve assets without a build step on the consumer side.

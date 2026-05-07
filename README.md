@@ -37,14 +37,29 @@ The dashboard reads OpenBroker's audit database directly, so it works for any au
 
 ### Dashboard Features
 
-- automation list with running/stale/stopped status
-- latest run metadata, script path, dry/live mode, PID, account metadata
-- live account snapshots from the audit DB
-- latest metrics emitted through `api.audit.metric`
-- logs from the automation runtime
-- audited client actions/orders/cancels
-- fills, errors, and notes
-- automatic browser refresh
+- generic across any `openbroker auto run` automation — no per-strategy assumptions baked in
+- live ticker tape with aggregated fleet signals (running / stale / errored / dry / equity Σ / fills Σ)
+- searchable + filterable automation rail with per-run mini equity sparklines and pulsing status LEDs
+- equity trajectory chart with hover crosshair, automatic delta + percentage callout
+- metrics explorer: every metric the automation emits via `api.audit.metric` becomes a selectable, charted series
+- timeline tabs: logs · fills · actions · metrics · notes · errors with live counts
+- latest run metadata, script path, dry/live mode, PID, account/wallet, websocket flag
+- 2s detail polling, 3s index polling, abort-aware fetch
+
+### Dashboard Architecture
+
+The dashboard is a React 19 + TypeScript app under `dashboard/`, built once with Vite and emitted into `public/`. The static HTTP server in `src/server.ts` serves whatever is in `public/`, so consumers don't need a build step at install time.
+
+```bash
+# develop the dashboard against a running monitor (proxies /api → :3001)
+npm run dashboard:install   # one time
+npm run dashboard:dev
+
+# build the production bundle into public/
+npm run dashboard:build
+```
+
+`prepack` runs `dashboard:build` automatically so `npm publish` ships fresh assets.
 
 ### Configuration
 
