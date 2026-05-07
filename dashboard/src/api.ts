@@ -26,13 +26,27 @@ export const api = {
     getJson<LogLine[]>(`/api/runs/${encodeURIComponent(runId)}/logs?limit=${limit}`, signal),
   metrics: (runId: string, limit = 400, signal?: AbortSignal) =>
     getJson<Metric[]>(`/api/runs/${encodeURIComponent(runId)}/metrics?limit=${limit}`, signal),
-  metricsByName: (runId: string, name: string, limit = 400, signal?: AbortSignal) =>
-    getJson<Metric[]>(
-      `/api/runs/${encodeURIComponent(runId)}/metrics?name=${encodeURIComponent(name)}&limit=${limit}`,
-      signal,
-    ),
-  snapshots: (runId: string, limit = 200, signal?: AbortSignal) =>
-    getJson<Snapshot[]>(`/api/runs/${encodeURIComponent(runId)}/snapshots?limit=${limit}`, signal),
+  metricsByName: (
+    runId: string,
+    name: string,
+    opts: { limit?: number; afterMs?: number | null } = {},
+    signal?: AbortSignal,
+  ) => {
+    const limit = opts.limit ?? 1500;
+    const params = new URLSearchParams({ name, limit: String(limit) });
+    if (opts.afterMs && Number.isFinite(opts.afterMs)) params.set('after', String(Math.floor(opts.afterMs)));
+    return getJson<Metric[]>(`/api/runs/${encodeURIComponent(runId)}/metrics?${params.toString()}`, signal);
+  },
+  snapshots: (
+    runId: string,
+    opts: { limit?: number; afterMs?: number | null } = {},
+    signal?: AbortSignal,
+  ) => {
+    const limit = opts.limit ?? 1500;
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (opts.afterMs && Number.isFinite(opts.afterMs)) params.set('after', String(Math.floor(opts.afterMs)));
+    return getJson<Snapshot[]>(`/api/runs/${encodeURIComponent(runId)}/snapshots?${params.toString()}`, signal);
+  },
   actions: (runId: string, limit = 100, signal?: AbortSignal) =>
     getJson<ActionRow[]>(`/api/runs/${encodeURIComponent(runId)}/actions?limit=${limit}`, signal),
   fills: (runId: string, limit = 100, signal?: AbortSignal) =>

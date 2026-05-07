@@ -22,6 +22,8 @@ import { KpiStrip } from './components/KpiStrip';
 import { Chart } from './components/Chart';
 import { MetricsExplorer } from './components/MetricsExplorer';
 import { Timeline } from './components/Timeline';
+import { AccountStanding } from './components/AccountStanding';
+import { TimeWindow, WINDOW_OPTIONS } from './components/TimeWindow';
 
 const POLL_INDEX_MS = 3_000;
 const POLL_RUN_MS = 2_000;
@@ -45,6 +47,7 @@ export function App() {
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [equityWindow, setEquityWindow] = useState<string>('all');
 
   const userPickedRef = useRef(false);
 
@@ -76,7 +79,7 @@ export function App() {
     return () => clearInterval(t);
   }, [refreshIndex]);
 
-  // run-detail polling driven by selectedRunId
+  // run-detail polling driven by selectedRunId + equity time window
   useEffect(() => {
     if (!selectedRunId) {
       setBundle(null);
@@ -84,12 +87,15 @@ export function App() {
     }
     let cancelled = false;
     const tick = async () => {
+      const opt = WINDOW_OPTIONS.find((o) => o.key === equityWindow) ?? WINDOW_OPTIONS[WINDOW_OPTIONS.length - 1];
+      const snapshotAfter = opt.ms ? Date.now() - opt.ms : null;
+      const snapshotLimit = opt.ms === null ? 5000 : 1500;
       try {
         const [run, logs, metrics, snapshots, actions, fills, notes, errors] = await Promise.all([
           api.run(selectedRunId),
           api.logs(selectedRunId, 200),
           api.metrics(selectedRunId, 400),
-          api.snapshots(selectedRunId, 200),
+          api.snapshots(selectedRunId, { limit: snapshotLimit, afterMs: snapshotAfter }),
           api.actions(selectedRunId, 100),
           api.fills(selectedRunId, 100),
           api.notes(selectedRunId, 100),
@@ -108,7 +114,7 @@ export function App() {
       cancelled = true;
       clearInterval(t);
     };
-  }, [selectedRunId]);
+  }, [selectedRunId, equityWindow]);
 
   const sparkSeries = useMemo<Record<string, number[]>>(() => {
     // build a quick equity series per automation — uses latestSnapshot for now
@@ -187,6 +193,7 @@ export function App() {
                     </div>
                     <div className="panel-rhs">
                       <span>{bundle.snapshots.length} snapshots</span>
+                      <TimeWindow value={equityWindow} onChange={setEquityWindow} />
                     </div>
                   </div>
                   <div className="chart-wrap">
@@ -200,7 +207,7 @@ export function App() {
                         >
                           {equityCallout.delta >= 0 ? '+' : ''}
                           {fmtUsd(equityCallout.delta)} ({equityCallout.pct >= 0 ? '+' : ''}
-                          {equityCallout.pct.toFixed(2)}%) since open
+                          {equityCallout.pct.toFixed(2)}%) over window
                         </span>
                       </div>
                     ) : null}
@@ -223,6 +230,8 @@ export function App() {
                   />
                 </section>
               </div>
+
+              <AccountStanding user={bundle.run.accountAddress} />
 
               <Timeline
                 logs={bundle.logs}

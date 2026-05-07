@@ -3,6 +3,7 @@ import type { Metric } from '../types';
 import { api } from '../api';
 import { classNames, fmtNum, fmtTime } from '../util';
 import { Chart } from './Chart';
+import { TimeWindow, WINDOW_OPTIONS } from './TimeWindow';
 
 interface Props {
   runId: string;
@@ -22,6 +23,7 @@ export function MetricsExplorer({ runId, latestMetrics }: Props) {
   }, [latestMetrics]);
 
   const [selected, setSelected] = useState<string | null>(null);
+  const [windowKey, setWindowKey] = useState<string>('6h');
 
   useEffect(() => {
     if (!names.length) {
@@ -42,33 +44,31 @@ export function MetricsExplorer({ runId, latestMetrics }: Props) {
       return;
     }
     let cancelled = false;
+    const opt = WINDOW_OPTIONS.find((o) => o.key === windowKey) ?? WINDOW_OPTIONS[1];
+    const afterMs = opt.ms ? Date.now() - opt.ms : null;
+
+    const fetchSeries = (signal?: AbortSignal) =>
+      api.metricsByName(runId, selected, { limit: opt.ms === null ? 5000 : 1500, afterMs }, signal);
+
     const controller = new AbortController();
     setLoading(true);
-    api
-      .metricsByName(runId, selected, 240, controller.signal)
-      .then((data) => {
-        if (!cancelled) setSeries(data);
-      })
-      .catch(() => {
-        if (!cancelled) setSeries([]);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+    fetchSeries(controller.signal)
+      .then((data) => { if (!cancelled) setSeries(data); })
+      .catch(() => { if (!cancelled) setSeries([]); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+
     const interval = setInterval(() => {
-      api
-        .metricsByName(runId, selected, 240)
-        .then((data) => {
-          if (!cancelled) setSeries(data);
-        })
+      fetchSeries()
+        .then((data) => { if (!cancelled) setSeries(data); })
         .catch(() => {});
     }, 5_000);
+
     return () => {
       cancelled = true;
       controller.abort();
       clearInterval(interval);
     };
-  }, [runId, selected]);
+  }, [runId, selected, windowKey]);
 
   const points = useMemo(
     () =>
@@ -108,9 +108,10 @@ export function MetricsExplorer({ runId, latestMetrics }: Props) {
         <div className="metric-headline">
           <span className="name">{selected ?? '—'}</span>
           <span className="now">{last ? fmtNum(last.value, 4) : '—'}</span>
-          <span style={{ marginLeft: 'auto', color: 'var(--dim)', fontSize: 10, letterSpacing: '0.16em', textTransform: 'uppercase' }}>
-            {loading ? 'syncing' : last ? `${fmtTime(last.timestamp)} · ${points.length} pts` : 'no data'}
-          </span>
+          <TimeWindow value={windowKey} onChange={setWindowKey} />
+        </div>
+        <div className="metric-meta">
+          <span>{loading ? 'syncing' : last ? `${fmtTime(last.timestamp)} · ${points.length} pts` : 'no data'}</span>
         </div>
         <Chart points={points} height={200} formatValue={(v) => fmtNum(v, 4)} />
       </div>

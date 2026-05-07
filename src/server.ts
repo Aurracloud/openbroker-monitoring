@@ -181,9 +181,18 @@ function writeJson(res: ServerResponse, status: number, body: unknown): void {
   res.end(JSON.stringify(body));
 }
 
-function getLimit(url: URL, fallback = 100, max = 1000): number {
+function getLimit(url: URL, fallback = 100, max = 5000): number {
   const parsed = Number(url.searchParams.get('limit') ?? fallback);
   return Math.max(1, Math.min(Number.isFinite(parsed) ? parsed : fallback, max));
+}
+
+function getRange(url: URL): { before: number | null; after: number | null } {
+  const before = Number(url.searchParams.get('before'));
+  const after = Number(url.searchParams.get('after'));
+  return {
+    before: Number.isFinite(before) && before > 0 ? before : null,
+    after: Number.isFinite(after) && after > 0 ? after : null,
+  };
 }
 
 function createApi(db: DatabaseSync, dbPath: string) {
@@ -288,30 +297,33 @@ function createApi(db: DatabaseSync, dbPath: string) {
       `).all(runId, limit).map(normalizeLog);
     },
 
-    metrics(runId: string, name: string | null, limit: number) {
-      if (name) {
-        return db.prepare(`
-          SELECT * FROM automation_metrics
-          WHERE run_id = ? AND name = ?
-          ORDER BY timestamp DESC, id DESC
-          LIMIT ?
-        `).all(runId, name, limit).map(normalizeMetric);
-      }
+    metrics(runId: string, name: string | null, limit: number, range: { before: number | null; after: number | null } = { before: null, after: null }) {
+      const where: string[] = ['run_id = ?'];
+      const params: (string | number)[] = [runId];
+      if (name) { where.push('name = ?'); params.push(name); }
+      if (range.before) { where.push('timestamp < ?'); params.push(range.before); }
+      if (range.after) { where.push('timestamp > ?'); params.push(range.after); }
+      params.push(limit);
       return db.prepare(`
         SELECT * FROM automation_metrics
-        WHERE run_id = ?
+        WHERE ${where.join(' AND ')}
         ORDER BY timestamp DESC, id DESC
         LIMIT ?
-      `).all(runId, limit).map(normalizeMetric);
+      `).all(...params).map(normalizeMetric);
     },
 
-    snapshots(runId: string, limit: number) {
+    snapshots(runId: string, limit: number, range: { before: number | null; after: number | null } = { before: null, after: null }) {
+      const where: string[] = ['run_id = ?'];
+      const params: (string | number)[] = [runId];
+      if (range.before) { where.push('timestamp < ?'); params.push(range.before); }
+      if (range.after) { where.push('timestamp > ?'); params.push(range.after); }
+      params.push(limit);
       return db.prepare(`
         SELECT * FROM automation_snapshots
-        WHERE run_id = ?
+        WHERE ${where.join(' AND ')}
         ORDER BY timestamp DESC, id DESC
         LIMIT ?
-      `).all(runId, limit).map(normalizeSnapshot);
+      `).all(...params).map(normalizeSnapshot);
     },
 
     actions(runId: string, limit: number) {
@@ -407,8 +419,8 @@ export function createMonitoringServer(options: MonitoringServerOptions = {}) {
           return;
         }
         if (resource === 'logs') writeJson(res, 200, api.logs(runId, limit));
-        else if (resource === 'metrics') writeJson(res, 200, api.metrics(runId, url.searchParams.get('name'), limit));
-        else if (resource === 'snapshots') writeJson(res, 200, api.snapshots(runId, limit));
+        else if (resource === 'metrics') writeJson(res, 200, api.metrics(runId, url.searchParams.get('name'), limit, getRange(url)));
+        else if (resource === 'snapshots') writeJson(res, 200, api.snapshots(runId, limit, getRange(url)));
         else if (resource === 'actions') writeJson(res, 200, api.actions(runId, limit));
         else if (resource === 'fills') writeJson(res, 200, api.fills(runId, limit));
         else if (resource === 'notes') writeJson(res, 200, api.notes(runId, limit));
