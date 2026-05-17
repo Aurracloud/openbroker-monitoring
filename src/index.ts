@@ -113,8 +113,25 @@ function postJSON(cfg: ResolvedConfig, path: string, body: unknown): void {
 export function createDashboardObserver(
   opts: DashboardObserverOptions = {},
 ): AutomationAuditObserver | null {
+  const hasRemoteForwardingConfig = Boolean(
+    opts.url ??
+      process.env.OB_DASHBOARD_URL ??
+      opts.apiKey ??
+      process.env.OB_DASHBOARD_API_KEY ??
+      opts.vaultAddress ??
+      process.env.HYPERSTABLE_VAULT_ADDRESS ??
+      process.env.VAULT
+  );
+
+  if (!hasRemoteForwardingConfig) {
+    console.log(
+      '[openbroker-monitoring] observer loaded — local dashboard reads the OpenBroker audit DB; remote forwarding disabled'
+    );
+    return {};
+  }
+
   const cfg = resolveConfig(opts);
-  if (!cfg) return null;
+  if (!cfg) return {};
 
   console.log(
     `[openbroker-monitoring] observer enabled — url=${cfg.url} vault=${cfg.vaultAddress.toLowerCase()} ` +
@@ -147,5 +164,3 @@ export function createDashboardObserver(
 // Default export is the factory so openbroker's convention loader works
 // regardless of whether the consumer passes options.
 export default createDashboardObserver;
-
-export { createMonitoringServer, startMonitoringServer } from './server.js';
