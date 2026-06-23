@@ -1,29 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api';
-import type {
-  ActionRow,
-  Automation,
-  ErrorRow,
-  Fill,
-  Health,
-  LogLine,
-  Metric,
-  Note,
-  RunDetail,
-  Snapshot,
-} from './types';
+import type { ActionRow, Automation, ErrorRow, Fill, Health, LogLine, Metric, Note, RunDetail, Snapshot } from './types';
 import { fmtUsd } from './util';
-import { StatusBar } from './components/StatusBar';
 import { Topbar } from './components/Topbar';
-import { TickerTape } from './components/TickerTape';
 import { AutomationRail } from './components/AutomationRail';
-import { Identity } from './components/Identity';
-import { KpiStrip } from './components/KpiStrip';
 import { Chart } from './components/Chart';
 import { MetricsExplorer } from './components/MetricsExplorer';
 import { Timeline } from './components/Timeline';
-import { AccountStanding } from './components/AccountStanding';
 import { TimeWindow, WINDOW_OPTIONS } from './components/TimeWindow';
+import { RiskOverview } from './components/RiskOverview';
+import { PerformanceStrip } from './components/PerformanceStrip';
+import { GuardrailPanel } from './components/GuardrailPanel';
 
 const POLL_INDEX_MS = 3_000;
 const POLL_RUN_MS = 2_000;
@@ -47,39 +34,35 @@ export function App() {
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [equityWindow, setEquityWindow] = useState<string>('all');
-
+  const [equityWindow, setEquityWindow] = useState<string>('24h');
   const userPickedRef = useRef(false);
 
   const refreshIndex = useCallback(async () => {
     setRefreshing(true);
     try {
-      const [list, h] = await Promise.all([api.automations(), api.health().catch(() => null)]);
+      const [list, nextHealth] = await Promise.all([api.automations(), api.health().catch(() => null)]);
       setAutomations(list);
-      setHealth(h);
+      setHealth(nextHealth);
       setLastUpdated(Date.now());
       setError(null);
-      // auto-select most recent only on first load
       setSelectedRunId((current) => {
-        if (current && list.some((a) => a.runId === current)) return current;
+        if (current && list.some((automation) => automation.runId === current)) return current;
         if (!userPickedRef.current && list.length > 0) return list[0].runId;
         return current;
       });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
       setRefreshing(false);
     }
   }, []);
 
-  // initial + interval index polling
   useEffect(() => {
     refreshIndex();
-    const t = setInterval(refreshIndex, POLL_INDEX_MS);
-    return () => clearInterval(t);
+    const interval = setInterval(refreshIndex, POLL_INDEX_MS);
+    return () => clearInterval(interval);
   }, [refreshIndex]);
 
-  // run-detail polling driven by selectedRunId + equity time window
   useEffect(() => {
     if (!selectedRunId) {
       setBundle(null);
@@ -87,9 +70,9 @@ export function App() {
     }
     let cancelled = false;
     const tick = async () => {
-      const opt = WINDOW_OPTIONS.find((o) => o.key === equityWindow) ?? WINDOW_OPTIONS[WINDOW_OPTIONS.length - 1];
-      const snapshotAfter = opt.ms ? Date.now() - opt.ms : null;
-      const snapshotLimit = opt.ms === null ? 5000 : 1500;
+      const option = WINDOW_OPTIONS.find((item) => item.key === equityWindow) ?? WINDOW_OPTIONS[2];
+      const snapshotAfter = option.ms ? Date.now() - option.ms : null;
+      const snapshotLimit = option.ms === null ? 5000 : 1500;
       try {
         const [run, logs, metrics, snapshots, actions, fills, notes, errors] = await Promise.all([
           api.run(selectedRunId),
@@ -98,163 +81,127 @@ export function App() {
           api.snapshots(selectedRunId, { limit: snapshotLimit, afterMs: snapshotAfter }),
           api.actions(selectedRunId, 100),
           api.fills(selectedRunId, 100),
-          api.notes(selectedRunId, 100),
+          api.notes(selectedRunId, 150),
           api.errors(selectedRunId, 100),
         ]);
         if (cancelled) return;
         setBundle({ run, logs, metrics, snapshots, actions, fills, notes, errors });
         setLastUpdated(Date.now());
-      } catch {
-        // index polling will surface the error banner
+      } catch (caught) {
+        if (!cancelled) setError(caught instanceof Error ? caught.message : String(caught));
       }
     };
     tick();
-    const t = setInterval(tick, POLL_RUN_MS);
+    const interval = setInterval(tick, POLL_RUN_MS);
     return () => {
       cancelled = true;
-      clearInterval(t);
+      clearInterval(interval);
     };
   }, [selectedRunId, equityWindow]);
 
   const sparkSeries = useMemo<Record<string, number[]>>(() => {
-    // build a quick equity series per automation — uses latestSnapshot for now
-    // (we don't fetch every run's snapshots for perf reasons; this is a stub
-    // that gets fleshed out for the selected run)
-    const m: Record<string, number[]> = {};
-    for (const a of automations) {
-      const e = Number(a.latestSnapshot?.equity);
-      if (Number.isFinite(e)) m[a.runId] = [e * 0.998, e * 1.001, e]; // gentle visual
-    }
-    if (selectedRunId && bundle?.snapshots?.length) {
-      m[selectedRunId] = [...bundle.snapshots]
+    if (!selectedRunId || !bundle?.snapshots.length) return {};
+    return {
+      [selectedRunId]: [...bundle.snapshots]
         .reverse()
-        .map((s) => Number(s.equity))
-        .filter(Number.isFinite);
-    }
-    return m;
-  }, [automations, bundle, selectedRunId]);
-
-  const onSelect = useCallback((a: Automation) => {
-    userPickedRef.current = true;
-    setSelectedRunId(a.runId);
-  }, []);
+        .map((snapshot) => Number(snapshot.equity))
+        .filter(Number.isFinite),
+    };
+  }, [bundle, selectedRunId]);
 
   const equityPoints = useMemo(() => {
     if (!bundle) return [];
     return [...bundle.snapshots]
       .reverse()
-      .map((s) => ({ timestamp: Number(s.timestamp), value: Number(s.equity) }))
-      .filter((p) => Number.isFinite(p.value) && Number.isFinite(p.timestamp));
+      .map((snapshot) => ({ timestamp: Number(snapshot.timestamp), value: Number(snapshot.equity) }))
+      .filter((point) => Number.isFinite(point.value) && Number.isFinite(point.timestamp));
   }, [bundle]);
 
   const equityCallout = useMemo(() => {
-    if (equityPoints.length < 1) return null;
-    const last = equityPoints[equityPoints.length - 1];
+    if (!equityPoints.length) return null;
     const first = equityPoints[0];
-    const delta = last.value - first.value;
-    const pct = first.value !== 0 ? (delta / first.value) * 100 : 0;
-    return { last, first, delta, pct };
+    const last = equityPoints[equityPoints.length - 1];
+    return { last, delta: last.value - first.value };
   }, [equityPoints]);
 
+  const latestMetrics = bundle?.run.latestMetrics ?? [];
+
   return (
-    <div className="shell">
-      <StatusBar health={health} lastUpdated={lastUpdated} error={error} />
-      <Topbar onRefresh={refreshIndex} refreshing={refreshing} />
-      <TickerTape automations={automations} />
-
-      {error ? (
-        <div className="banner">
-          <span className="led bad" />
-          UPLINK ERROR · {error}
-        </div>
-      ) : null}
-
-      <div className="layout">
+    <div className="app-shell">
+      <aside className="sidebar">
+        <div className="sidebar-brand"><span>openbroker</span><i className="pulse-dot" /></div>
         <AutomationRail
           automations={automations}
           selectedRunId={selectedRunId}
-          onSelect={onSelect}
+          onSelect={(automation) => {
+            userPickedRef.current = true;
+            setSelectedRunId(automation.runId);
+          }}
           sparkSeries={sparkSeries}
         />
-        <main className="main">
+        <div className="sidebar-status">
+          <span className={`led ${error ? 'bad' : 'live'}`} />
+          <span>{error ? 'Monitor disconnected' : 'Audit feed connected'}</span>
+        </div>
+      </aside>
+
+      <div className="workspace">
+        <Topbar
+          onRefresh={refreshIndex}
+          refreshing={refreshing}
+          run={bundle?.run ?? null}
+          health={health}
+          lastUpdated={lastUpdated}
+          error={error}
+        />
+
+        <main className="dashboard-main">
+          {error ? <div className="banner"><span className="led bad" />Monitor error · {error}</div> : null}
           {!bundle ? (
             <EmptyStage hasAny={automations.length > 0} />
           ) : (
             <>
-              <Identity run={bundle.run} />
-              <KpiStrip run={bundle.run} snapshots={bundle.snapshots} />
+              <RiskOverview run={bundle.run} logs={bundle.logs} />
+              <PerformanceStrip run={bundle.run} snapshots={bundle.snapshots} metrics={latestMetrics} />
 
-              <div className="split-2">
-                <section className="panel">
+              <div className="primary-grid">
+                <section className="panel equity-panel">
                   <div className="panel-head">
-                    <div className="lhs">
-                      <span className="panel-eyebrow">[A]</span>
-                      <span className="panel-title">Equity Trajectory</span>
-                    </div>
-                    <div className="panel-rhs">
-                      <span>{bundle.snapshots.length} snapshots</span>
-                      <TimeWindow value={equityWindow} onChange={setEquityWindow} />
+                    <div><span className="section-kicker">Portfolio</span><h2>Equity &amp; exposure</h2></div>
+                    <TimeWindow value={equityWindow} onChange={setEquityWindow} />
+                  </div>
+                  <div className="chart-summary">
+                    <div><strong>{fmtUsd(equityCallout?.last.value)}</strong><span>Current equity</span></div>
+                    <div className={equityCallout && equityCallout.delta < 0 ? 'neg' : 'pos'}>
+                      <strong>{equityCallout ? `${equityCallout.delta >= 0 ? '+' : ''}${fmtUsd(equityCallout.delta)}` : '—'}</strong>
+                      <span>Over selected window</span>
                     </div>
                   </div>
-                  <div className="chart-wrap">
-                    {equityCallout ? (
-                      <div className="chart-callout">
-                        <span className="now">{fmtUsd(equityCallout.last.value)}</span>
-                        <span
-                          className={`delta ${
-                            equityCallout.delta > 0 ? 'up' : equityCallout.delta < 0 ? 'down' : 'flat'
-                          }`}
-                        >
-                          {equityCallout.delta >= 0 ? '+' : ''}
-                          {fmtUsd(equityCallout.delta)} ({equityCallout.pct >= 0 ? '+' : ''}
-                          {equityCallout.pct.toFixed(2)}%) over window
-                        </span>
-                      </div>
-                    ) : null}
-                    <Chart points={equityPoints} formatValue={(v) => fmtUsd(v, 0)} />
-                  </div>
+                  <div className="chart-wrap"><Chart points={equityPoints} height={250} formatValue={(value) => fmtUsd(value, 0)} /></div>
                 </section>
-                <section className="panel">
-                  <div className="panel-head">
-                    <div className="lhs">
-                      <span className="panel-eyebrow">[B]</span>
-                      <span className="panel-title">Metrics Explorer</span>
-                    </div>
-                    <div className="panel-rhs">
-                      <span>{bundle.run.latestMetrics?.length ?? 0} active</span>
-                    </div>
-                  </div>
-                  <MetricsExplorer
-                    runId={bundle.run.runId}
-                    latestMetrics={bundle.run.latestMetrics ?? []}
-                  />
-                </section>
+                <GuardrailPanel run={bundle.run} metrics={latestMetrics} actions={bundle.actions} />
               </div>
-
-              <AccountStanding user={bundle.run.accountAddress} />
 
               <Timeline
                 logs={bundle.logs}
                 fills={bundle.fills}
                 actions={bundle.actions}
-                metrics={bundle.metrics}
                 notes={bundle.notes}
                 errors={bundle.errors}
                 counts={bundle.run.counts}
               />
+
+              <section className="panel telemetry-panel">
+                <div className="panel-head">
+                  <div><span className="section-kicker">Deep telemetry</span><h2>Metric explorer</h2></div>
+                  <span className="panel-note">{latestMetrics.length} live series</span>
+                </div>
+                <MetricsExplorer runId={bundle.run.runId} latestMetrics={latestMetrics} />
+              </section>
             </>
           )}
         </main>
       </div>
-
-      <footer className="footer">
-        <span className="feed-pulse">
-          <span className={`led ${error ? 'bad' : 'live'}`} />
-          {error ? 'feed offline' : 'feed live · audit sqlite'}
-        </span>
-        <span>{health?.dbPath ?? '—'}</span>
-        <span>poll · index {POLL_INDEX_MS / 1000}s · run {POLL_RUN_MS / 1000}s</span>
-      </footer>
     </div>
   );
 }
@@ -262,13 +209,9 @@ export function App() {
 function EmptyStage({ hasAny }: { hasAny: boolean }) {
   return (
     <div className="empty-stage">
-      <div>
-        <h2>
-          await <em>signal</em>
-        </h2>
-        <p>{hasAny ? 'select an automation from the rail' : 'no automation runs in audit db yet'}</p>
-        <div className="crosshair" />
-      </div>
+      <span className="empty-orbit" />
+      <h2>{hasAny ? 'Select an automation' : 'No automation runs yet'}</h2>
+      <p>{hasAny ? 'Choose a run from the left rail to inspect its risk posture.' : 'The monitor will populate when an audited automation starts.'}</p>
     </div>
   );
 }

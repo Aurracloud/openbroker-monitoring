@@ -36,15 +36,19 @@ export function AutomationRail({ automations, selectedRunId, onSelect, sparkSeri
   }, [automations, query, filter]);
 
   return (
-    <aside className="rail">
+    <div className="rail">
       <div className="rail-head">
-        <h2>automations</h2>
-        <span className="count">[{filtered.length}/{automations.length}]</span>
+        <div>
+          <span className="rail-kicker">Runtime oversight</span>
+          <h1>Automation monitor</h1>
+        </div>
+        <span className="count">{filtered.length}/{automations.length}</span>
       </div>
       <div className="rail-search">
         <input
           className="search-input"
-          placeholder="grep automation, script, address…"
+          placeholder="Search automations"
+          aria-label="Search automations"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
@@ -78,7 +82,7 @@ export function AutomationRail({ automations, selectedRunId, onSelect, sparkSeri
           ))
         )}
       </div>
-    </aside>
+    </div>
   );
 }
 
@@ -104,18 +108,14 @@ function AutomationCard({ automation, active, onSelect, spark }: CardProps) {
       onClick={onSelect}
       data-status={automation.status}
     >
-      <div>
+      <div className="auto-copy">
         <div className="auto-title">
           <span className={`led ${color}`} />
           {automation.automationId}
         </div>
         <div className="auto-meta">
-          <span className={`tag ${color}`}>{automation.status}</span>
-          <span className={`tag ${automation.dryRun ? 'dry' : 'cyan'}`}>
-            {automation.dryRun ? 'DRY' : 'LIVE'}
-          </span>
-          {automation.useWebSocket ? <span className="tag ghost">WS</span> : null}
-          {automation.pid ? <span className="tag ghost">PID·{automation.pid}</span> : null}
+          <span className={`tag ${color}`}>{automation.status === 'running' ? 'LIVE' : automation.status}</span>
+          {automation.dryRun ? <span className="tag dry">DRY RUN</span> : null}
         </div>
         <div className="auto-script" title={automation.scriptPath}>
           {scriptShort || automation.runId}
@@ -123,12 +123,12 @@ function AutomationCard({ automation, active, onSelect, spark }: CardProps) {
       </div>
       <div className="auto-spark">
         {spark.length >= 2 ? <Sparkline values={spark} ariaLabel="equity sparkline" /> : null}
-        <div className="auto-time">
-          {equity !== undefined ? fmtUsd(equity, 0) : ''}
+        <div className="auto-equity">
+          <span>Equity</span><strong>{equity !== undefined ? fmtUsd(equity, 2) : '—'}</strong>
         </div>
       </div>
       <div />
-      <div className="auto-time">{fmtRelative(last)}</div>
+      <div className="auto-time"><span>Last tick</span>{fmtRelative(last)}</div>
     </button>
   );
 }

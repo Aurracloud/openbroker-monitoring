@@ -11,6 +11,30 @@ export interface AutomationCounts {
   logs?: number;
   metrics?: number;
   notes?: number;
+  guardrailBlocks?: number;
+}
+
+export interface GuardrailPolicy {
+  mode?: string;
+  allowedMarkets?: string[];
+  maxOrderUsd?: number;
+  maxPositionUsd?: number;
+  maxTotalExposureUsd?: number;
+  maxLeverage?: number;
+  maxMarginUsedPct?: number;
+  maxOpenOrders?: number;
+  maxOrdersPerMinute?: number;
+  maxSlippageBps?: number;
+  allowMarketOrders?: boolean;
+  allowAccountWideCancel?: boolean;
+  [key: string]: unknown;
+}
+
+export interface GuardrailSummary {
+  policy?: GuardrailPolicy | null;
+  configuredAt?: number | null;
+  blocks?: number;
+  lastBlockAt?: number | null;
 }
 
 export interface Snapshot {
@@ -115,6 +139,7 @@ export interface RunDetail extends Automation {
   latestSnapshot?: Snapshot | null;
   latestMetrics?: Metric[];
   counts?: AutomationCounts;
+  guardrails?: GuardrailSummary;
 }
 
 export interface Health {

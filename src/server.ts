@@ -222,6 +222,28 @@ function createApi(db: DatabaseSync, dbPath: string) {
     `).all(runId, runId).map(normalizeMetric);
   }
 
+  function guardrailSummary(runId: string): JsonRecord {
+    const configured = asObject(db.prepare(`
+      SELECT timestamp, payload_json
+      FROM automation_notes
+      WHERE run_id = ? AND kind = 'guardrails'
+      ORDER BY timestamp DESC, id DESC
+      LIMIT 1
+    `).get(runId));
+    const blockStats = asObject(db.prepare(`
+      SELECT COUNT(*) AS blocks, MAX(timestamp) AS last_block_at
+      FROM automation_notes
+      WHERE run_id = ? AND kind = 'guardrail_block'
+    `).get(runId));
+
+    return {
+      policy: configured.payload_json ? parseJson(configured.payload_json) : null,
+      configuredAt: configured.timestamp ?? null,
+      blocks: Number(blockStats.blocks ?? 0),
+      lastBlockAt: blockStats.last_block_at ?? null,
+    };
+  }
+
   return {
     health() {
       return {
@@ -254,8 +276,9 @@ function createApi(db: DatabaseSync, dbPath: string) {
             (SELECT COUNT(*) FROM automation_errors WHERE run_id = ?) AS errors,
             (SELECT COUNT(*) FROM automation_fills WHERE run_id = ?) AS fills,
             (SELECT COUNT(*) FROM automation_actions WHERE run_id = ?) AS actions,
-            (SELECT COUNT(*) FROM automation_logs WHERE run_id = ?) AS logs
-        `).get(runId, runId, runId, runId));
+            (SELECT COUNT(*) FROM automation_logs WHERE run_id = ?) AS logs,
+            (SELECT COUNT(*) FROM automation_notes WHERE run_id = ? AND kind = 'guardrail_block') AS guardrailBlocks
+        `).get(runId, runId, runId, runId, runId));
         return { ...run, latestSnapshot: snapshot, latestMetrics: latestMetrics(runId), counts };
       });
     },
@@ -276,6 +299,7 @@ function createApi(db: DatabaseSync, dbPath: string) {
         ...normalizeRun(row),
         latestSnapshot: latestSnapshot(runId),
         latestMetrics: latestMetrics(runId),
+        guardrails: guardrailSummary(runId),
         counts: asObject(db.prepare(`
           SELECT
             (SELECT COUNT(*) FROM automation_errors WHERE run_id = ?) AS errors,
@@ -283,8 +307,9 @@ function createApi(db: DatabaseSync, dbPath: string) {
             (SELECT COUNT(*) FROM automation_actions WHERE run_id = ?) AS actions,
             (SELECT COUNT(*) FROM automation_notes WHERE run_id = ?) AS notes,
             (SELECT COUNT(*) FROM automation_metrics WHERE run_id = ?) AS metrics,
-            (SELECT COUNT(*) FROM automation_logs WHERE run_id = ?) AS logs
-        `).get(runId, runId, runId, runId, runId, runId)),
+            (SELECT COUNT(*) FROM automation_logs WHERE run_id = ?) AS logs,
+            (SELECT COUNT(*) FROM automation_notes WHERE run_id = ? AND kind = 'guardrail_block') AS guardrailBlocks
+        `).get(runId, runId, runId, runId, runId, runId, runId)),
       };
     },
 
