@@ -109,20 +109,23 @@ export function App() {
     };
   }, [bundle, selectedRunId]);
 
-  const equityPoints = useMemo(() => {
+  const portfolioPoints = useMemo(() => {
     if (!bundle) return [];
     return [...bundle.snapshots]
       .reverse()
-      .map((snapshot) => ({ timestamp: Number(snapshot.timestamp), value: Number(snapshot.equity) }))
+      .map((snapshot) => ({
+        timestamp: Number(snapshot.timestamp),
+        value: Number(snapshot.portfolioValue ?? snapshot.equity),
+      }))
       .filter((point) => Number.isFinite(point.value) && Number.isFinite(point.timestamp));
   }, [bundle]);
 
-  const equityCallout = useMemo(() => {
-    if (!equityPoints.length) return null;
-    const first = equityPoints[0];
-    const last = equityPoints[equityPoints.length - 1];
+  const portfolioCallout = useMemo(() => {
+    if (!portfolioPoints.length) return null;
+    const first = portfolioPoints[0];
+    const last = portfolioPoints[portfolioPoints.length - 1];
     return { last, delta: last.value - first.value };
-  }, [equityPoints]);
+  }, [portfolioPoints]);
 
   const latestMetrics = bundle?.run.latestMetrics ?? [];
 
@@ -167,17 +170,17 @@ export function App() {
               <div className="primary-grid">
                 <section className="panel equity-panel">
                   <div className="panel-head">
-                    <div><span className="section-kicker">Portfolio</span><h2>Equity &amp; exposure</h2></div>
+                    <div><span className="section-kicker">Portfolio</span><h2>NAV &amp; exposure</h2></div>
                     <TimeWindow value={equityWindow} onChange={setEquityWindow} />
                   </div>
                   <div className="chart-summary">
-                    <div><strong>{fmtUsd(equityCallout?.last.value)}</strong><span>Current equity</span></div>
-                    <div className={equityCallout && equityCallout.delta < 0 ? 'neg' : 'pos'}>
-                      <strong>{equityCallout ? `${equityCallout.delta >= 0 ? '+' : ''}${fmtUsd(equityCallout.delta)}` : '—'}</strong>
+                    <div><strong>{fmtUsd(portfolioCallout?.last.value)}</strong><span>Portfolio NAV</span></div>
+                    <div className={portfolioCallout && portfolioCallout.delta < 0 ? 'neg' : 'pos'}>
+                      <strong>{portfolioCallout ? `${portfolioCallout.delta >= 0 ? '+' : ''}${fmtUsd(portfolioCallout.delta)}` : '—'}</strong>
                       <span>Over selected window</span>
                     </div>
                   </div>
-                  <div className="chart-wrap"><Chart points={equityPoints} height={250} formatValue={(value) => fmtUsd(value, 0)} /></div>
+                  <div className="chart-wrap"><Chart points={portfolioPoints} height={250} formatValue={(value) => fmtUsd(value, 0)} /></div>
                 </section>
                 <GuardrailPanel run={bundle.run} metrics={latestMetrics} actions={bundle.actions} />
               </div>

@@ -17,6 +17,7 @@ type JsonRecord = Record<string, unknown>;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_DB_PATH = path.join(os.homedir(), '.openbroker', 'automation-audit.sqlite');
 const DEFAULT_STATIC_DIR = path.resolve(__dirname, '..', 'public');
+const PORTFOLIO_METRIC_MAX_GAP_MS = 5 * 60 * 1000;
 
 const CONTENT_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -37,6 +38,12 @@ function parseJson(value: unknown): unknown {
 
 function asObject(value: unknown): JsonRecord {
   return value && typeof value === 'object' ? value as JsonRecord : {};
+}
+
+function metricCandidate(timestamp: unknown, value: unknown): { timestamp: number; value: number } | null {
+  if (timestamp === null || timestamp === undefined || value === null || value === undefined) return null;
+  const candidate = { timestamp: Number(timestamp), value: Number(value) };
+  return Number.isFinite(candidate.timestamp) && Number.isFinite(candidate.value) ? candidate : null;
 }
 
 function isProcessAlive(pid: unknown): boolean {
@@ -82,12 +89,32 @@ function normalizeRun(row: unknown): JsonRecord {
 function normalizeSnapshot(row: unknown): JsonRecord | null {
   if (!row) return null;
   const r = asObject(row);
+  const equity = Number(r.equity);
+  const snapshotTimestamp = Number(r.timestamp);
+  const spotBefore = metricCandidate(r.spot_timestamp_before, r.spot_value_before);
+  const spotAfter = metricCandidate(r.spot_timestamp_after, r.spot_value_after);
+  const spotCandidates = [spotBefore, spotAfter].filter((candidate) => candidate !== null);
+  const closestSpot = spotCandidates.reduce<(typeof spotCandidates)[number] | null>((closest, candidate) => {
+    if (!closest) return candidate;
+    return Math.abs(candidate.timestamp - snapshotTimestamp) < Math.abs(closest.timestamp - snapshotTimestamp)
+      ? candidate
+      : closest;
+  }, null);
+  const spotValueUsd = spotBefore && spotAfter && spotAfter.timestamp > spotBefore.timestamp
+    ? spotBefore.value + (
+      (spotAfter.value - spotBefore.value)
+      * ((snapshotTimestamp - spotBefore.timestamp) / (spotAfter.timestamp - spotBefore.timestamp))
+    )
+    : closestSpot?.value ?? null;
+  const hasSpotValue = spotValueUsd !== null && Number.isFinite(spotValueUsd);
   return {
     id: r.id,
     runId: r.run_id,
     timestamp: r.timestamp,
     pollCount: r.poll_count,
-    equity: r.equity,
+    equity,
+    spotValueUsd: hasSpotValue ? spotValueUsd : null,
+    portfolioValue: Number.isFinite(equity) ? equity + (hasSpotValue ? spotValueUsd : 0) : null,
     marginUsed: r.margin_used,
     marginUsedPct: r.margin_used_pct,
     positions: parseJson(r.positions_json),
@@ -200,11 +227,42 @@ function createApi(db: DatabaseSync, dbPath: string) {
 
   function latestSnapshot(runId: string): JsonRecord | null {
     return normalizeSnapshot(db.prepare(`
-      SELECT * FROM automation_snapshots
-      WHERE run_id = ?
-      ORDER BY timestamp DESC, id DESC
+      SELECT s.*,
+        (
+          SELECT m.value FROM automation_metrics m
+          WHERE m.run_id = s.run_id AND m.name = 'spot_usd'
+            AND m.timestamp BETWEEN s.timestamp - ? AND s.timestamp
+          ORDER BY m.timestamp DESC, m.id DESC LIMIT 1
+        ) AS spot_value_before,
+        (
+          SELECT m.timestamp FROM automation_metrics m
+          WHERE m.run_id = s.run_id AND m.name = 'spot_usd'
+            AND m.timestamp BETWEEN s.timestamp - ? AND s.timestamp
+          ORDER BY m.timestamp DESC, m.id DESC LIMIT 1
+        ) AS spot_timestamp_before,
+        (
+          SELECT m.value FROM automation_metrics m
+          WHERE m.run_id = s.run_id AND m.name = 'spot_usd'
+            AND m.timestamp > s.timestamp AND m.timestamp <= s.timestamp + ?
+          ORDER BY m.timestamp ASC, m.id ASC LIMIT 1
+        ) AS spot_value_after,
+        (
+          SELECT m.timestamp FROM automation_metrics m
+          WHERE m.run_id = s.run_id AND m.name = 'spot_usd'
+            AND m.timestamp > s.timestamp AND m.timestamp <= s.timestamp + ?
+          ORDER BY m.timestamp ASC, m.id ASC LIMIT 1
+        ) AS spot_timestamp_after
+      FROM automation_snapshots s
+      WHERE s.run_id = ?
+      ORDER BY s.timestamp DESC, s.id DESC
       LIMIT 1
-    `).get(runId));
+    `).get(
+      PORTFOLIO_METRIC_MAX_GAP_MS,
+      PORTFOLIO_METRIC_MAX_GAP_MS,
+      PORTFOLIO_METRIC_MAX_GAP_MS,
+      PORTFOLIO_METRIC_MAX_GAP_MS,
+      runId,
+    ));
   }
 
   function latestMetrics(runId: string): JsonRecord[] {
@@ -338,15 +396,46 @@ function createApi(db: DatabaseSync, dbPath: string) {
     },
 
     snapshots(runId: string, limit: number, range: { before: number | null; after: number | null } = { before: null, after: null }) {
-      const where: string[] = ['run_id = ?'];
-      const params: (string | number)[] = [runId];
-      if (range.before) { where.push('timestamp < ?'); params.push(range.before); }
-      if (range.after) { where.push('timestamp > ?'); params.push(range.after); }
+      const where: string[] = ['s.run_id = ?'];
+      const params: (string | number)[] = [
+        PORTFOLIO_METRIC_MAX_GAP_MS,
+        PORTFOLIO_METRIC_MAX_GAP_MS,
+        PORTFOLIO_METRIC_MAX_GAP_MS,
+        PORTFOLIO_METRIC_MAX_GAP_MS,
+        runId,
+      ];
+      if (range.before) { where.push('s.timestamp < ?'); params.push(range.before); }
+      if (range.after) { where.push('s.timestamp > ?'); params.push(range.after); }
       params.push(limit);
       return db.prepare(`
-        SELECT * FROM automation_snapshots
+        SELECT s.*,
+          (
+            SELECT m.value FROM automation_metrics m
+            WHERE m.run_id = s.run_id AND m.name = 'spot_usd'
+              AND m.timestamp BETWEEN s.timestamp - ? AND s.timestamp
+            ORDER BY m.timestamp DESC, m.id DESC LIMIT 1
+          ) AS spot_value_before,
+          (
+            SELECT m.timestamp FROM automation_metrics m
+            WHERE m.run_id = s.run_id AND m.name = 'spot_usd'
+              AND m.timestamp BETWEEN s.timestamp - ? AND s.timestamp
+            ORDER BY m.timestamp DESC, m.id DESC LIMIT 1
+          ) AS spot_timestamp_before,
+          (
+            SELECT m.value FROM automation_metrics m
+            WHERE m.run_id = s.run_id AND m.name = 'spot_usd'
+              AND m.timestamp > s.timestamp AND m.timestamp <= s.timestamp + ?
+            ORDER BY m.timestamp ASC, m.id ASC LIMIT 1
+          ) AS spot_value_after,
+          (
+            SELECT m.timestamp FROM automation_metrics m
+            WHERE m.run_id = s.run_id AND m.name = 'spot_usd'
+              AND m.timestamp > s.timestamp AND m.timestamp <= s.timestamp + ?
+            ORDER BY m.timestamp ASC, m.id ASC LIMIT 1
+          ) AS spot_timestamp_after
+        FROM automation_snapshots s
         WHERE ${where.join(' AND ')}
-        ORDER BY timestamp DESC, id DESC
+        ORDER BY s.timestamp DESC, s.id DESC
         LIMIT ?
       `).all(...params).map(normalizeSnapshot);
     },

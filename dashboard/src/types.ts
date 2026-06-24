@@ -43,6 +43,8 @@ export interface Snapshot {
   timestamp: number;
   pollCount?: number;
   equity?: number;
+  spotValueUsd?: number | null;
+  portfolioValue?: number | null;
   marginUsed?: number;
   marginUsedPct?: number;
   positions?: unknown;

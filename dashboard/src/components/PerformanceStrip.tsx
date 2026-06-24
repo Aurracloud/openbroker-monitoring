@@ -10,7 +10,11 @@ interface Props {
 export function PerformanceStrip({ run, snapshots, metrics }: Props) {
   const latest = run.latestSnapshot ?? snapshots[0];
   const first = snapshots.length ? snapshots[snapshots.length - 1] : null;
-  const equityDelta = latest && first ? Number(latest.equity) - Number(first.equity) : null;
+  const latestPortfolioValue = latest ? Number(latest.portfolioValue ?? latest.equity) : null;
+  const firstPortfolioValue = first ? Number(first.portfolioValue ?? first.equity) : null;
+  const portfolioDelta = latestPortfolioValue !== null && firstPortfolioValue !== null
+    ? latestPortfolioValue - firstPortfolioValue
+    : null;
   const byName = new Map(metrics.map((metric) => [metric.name, Number(metric.value)]));
   const spot = byName.get('spot_usd');
   const short = byName.get('short_usd');
@@ -21,10 +25,10 @@ export function PerformanceStrip({ run, snapshots, metrics }: Props) {
   return (
     <section className="performance-strip" aria-label="Key performance metrics">
       <MetricCell
-        value={fmtUsd(latest?.equity)}
-        label="Account equity"
-        foot={equityDelta === null ? 'awaiting history' : `${equityDelta >= 0 ? '+' : ''}${fmtUsd(equityDelta)} over window`}
-        tone={equityDelta !== null && equityDelta < 0 ? 'bad' : 'live'}
+        value={fmtUsd(latestPortfolioValue)}
+        label="Portfolio NAV"
+        foot={portfolioDelta === null ? 'awaiting history' : `${portfolioDelta >= 0 ? '+' : ''}${fmtUsd(portfolioDelta)} over window`}
+        tone={portfolioDelta !== null && portfolioDelta < 0 ? 'bad' : 'live'}
       />
       <MetricCell
         value={delta === null ? '—' : `${delta >= 0 ? '+' : ''}${fmtUsd(delta)}`}
