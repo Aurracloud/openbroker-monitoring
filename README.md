@@ -10,10 +10,18 @@ The package now has two jobs:
 ## Install
 
 ```bash
-npm install openbroker openbroker-monitoring
+openbroker install monitoring
 ```
 
-## Local Dashboard
+This installs `openbroker-monitoring@latest` globally and exposes the `openbroker-monitoring` command. It is safe to run again when upgrading.
+
+Direct npm fallback:
+
+```bash
+npm install --global openbroker-monitoring@latest
+```
+
+## Operate the Local Dashboard
 
 Run your automation in one terminal:
 
@@ -24,7 +32,7 @@ openbroker auto run ./my-automation.ts --id my-auto
 Run the monitor in another terminal:
 
 ```bash
-openbroker-monitoring serve --port 3001
+openbroker-monitoring serve --host 127.0.0.1 --port 3001
 ```
 
 Then open:
@@ -35,12 +43,35 @@ http://127.0.0.1:3001
 
 The dashboard reads OpenBroker's audit database directly, so it works for any automation that uses the standard `openbroker auto run` runtime. No vault address, registry entry, webhook, or dashboard env vars are required.
 
+Stop the monitor with `Ctrl+C`. Restart the command after changing its host, port, database path, or installed version. Restarting the monitor does not stop or restart any trading automation.
+
+## Upgrade
+
+Install the latest published release, then restart the monitor process:
+
+```bash
+openbroker install monitoring
+openbroker-monitoring serve --host 127.0.0.1 --port 3001
+```
+
+Install an exact release when you need to pin or roll back:
+
+```bash
+openbroker install monitoring --tag 1.4.2
+```
+
+Preview without changing the installation:
+
+```bash
+openbroker install monitoring --dry
+```
+
 ### Dashboard Features
 
 - generic across any `openbroker auto run` automation — no per-strategy assumptions baked in
 - live ticker tape with aggregated fleet signals (running / stale / errored / dry / equity Σ / fills Σ)
 - searchable + filterable automation rail with per-run mini equity sparklines and pulsing status LEDs
-- equity trajectory chart with hover crosshair, automatic delta + percentage callout
+- portfolio NAV trajectory chart with hover crosshair and automatic window delta callout
 - metrics explorer: every metric the automation emits via `api.audit.metric` becomes a selectable, charted series
 - timeline tabs: logs · fills · actions · metrics · notes · errors with live counts
 - latest run metadata, script path, dry/live mode, PID, account/wallet, websocket flag
